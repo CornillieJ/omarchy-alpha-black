@@ -1,0 +1,8 @@
+# Hyprland builds that the Hypr-DarkWindow commit pinned in alpha-black has
+# been checked against (builds, loads, and takes hypr-darkwindow-glass.patch).
+# Alpha Black builds nothing on a Hyprland commit missing here. When adding a
+# Hyprland release, take its Hypr-DarkWindow commit from upstream hyprpm.toml
+# and update the pin in alpha-black too.
+36b2e0cfe0c6094dbc47bd42a437431315bb3087 # v0.56.0
+5c9377c15f85c50648f35ca5a213754f95b93ca0 # v0.56.1
+efb50993780079460b0cbed1363e2166a2de1d9f # v0.56.2

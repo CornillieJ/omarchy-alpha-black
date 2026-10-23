@@ -56,10 +56,10 @@ o.bind(hyper .. "B", "Alpha Black", "~/.config/omarchy/plugins/jeffrey.alpha-bla
 The transparency is done by the
 [Hypr-DarkWindow](https://github.com/micha4w/Hypr-DarkWindow) Hyprland
 plugin. You don't install it yourself. Alpha Black clones it into
-`~/.local/share/hypr-darkwindow` and builds the commit pinned for your
-Hyprland version. It does this on first use and again after every Hyprland
-update. A brand new Hyprland release needs an Alpha Black update with its
-pin first; until then you get a notification instead of a build.
+`~/.local/share/hypr-darkwindow` and builds one pinned commit of it. It does
+this on first use and again after every Hyprland update. A brand new
+Hyprland release needs an Alpha Black update first; until then you get a
+notification instead of a build.
 
 Building needs `git`, `make`, `g++`, `pkg-config` and the Hyprland headers.
 All of them come with a standard Omarchy install. `hyprpicker` (also
@@ -99,10 +99,12 @@ Alpha Black does something you might not expect.
 
 **It builds and loads a Hyprland plugin at runtime.** Hypr-DarkWindow is a
 compiled `.so` that only loads into the exact Hyprland build it was compiled
-against. Alpha Black only builds the exact commit listed for your Hyprland
-build in [`darkwindow-pins`](darkwindow-pins). It fetches just that commit,
-checks it out detached and verifies it before building, so it never builds
-a moving branch. If your Hyprland version isn't listed yet, you get a
+against. Alpha Black only ever builds one exact Hypr-DarkWindow commit,
+written into the `alpha-black` script. It fetches just that commit and
+checks it out detached before patching and building, all in one chain that
+stops at the first failure, so it never builds a moving branch. It only does
+this on the Hyprland builds listed in
+[`supported-hyprland`](supported-hyprland). On any other version you get a
 notification instead of a build.
 
 The `.so` is loaded the first time you use Alpha Black in a session, never
@@ -127,13 +129,9 @@ load.
   name prefix, and `shouldBlur` has three overloads. The patch lets a hook
   name one exact signature.
 
-If a future Hypr-DarkWindow version no longer takes the patch, Alpha Black
-builds it unpatched and tells you. Frost then becomes all-or-nothing, and
-apps like foot won't blur.
-
-The same applies if Hypr-DarkWindow was already loaded by something else
-(hyprpm, your own config). Alpha Black uses it as-is and assumes it's
-unpatched.
+If Hypr-DarkWindow was already loaded by something else (hyprpm, your own
+config), Alpha Black uses it as-is and assumes it's unpatched. Frost is then
+all-or-nothing, and apps like foot won't blur.
 
 **It changes `no_blur` on the windows it touches.** While a window is on
 with Frost at 0, its `no_blur` property is set to 1, so a blurred backdrop

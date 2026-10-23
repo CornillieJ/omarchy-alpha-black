@@ -20,7 +20,7 @@ DARKWINDOW_SRC="${XDG_DATA_HOME:-$HOME/.local/share}/hypr-darkwindow"
 DARKWINDOW_SO="$DARKWINDOW_SRC/out/hypr-darkwindow.so"
 BUILT_FOR="$DARKWINDOW_SRC/out/.alpha-black-build"
 GLASS_PATCH="$PLUGIN_DIR/hypr-darkwindow-glass.patch"
-PINS_FILE="$PLUGIN_DIR/darkwindow-pins"
+SUPPORTED_FILE="$PLUGIN_DIR/supported-hyprland"
 
 # What this plugin added to the system, so uninstall removes only that.
 INSTALL_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/alpha-black"
@@ -49,13 +49,12 @@ record_install() {
 
 # The .so only loads into the exact Hyprland build it was compiled against, so
 # it's (re)built whenever the running Hyprland commit or the glass patch
-# changes. Only the exact commit pinned for that Hyprland build in
-# darkwindow-pins is fetched and built, so what runs is what was reviewed.
+# changes. Only one exact, reviewed Hypr-DarkWindow commit is ever built, on
+# the Hyprland builds listed in supported-hyprland.
 build_darkwindow() {
-  local build_key=$1 hypr_commit=${1%% *} pin patched=patched
-  pin=$(awk -v c="$hypr_commit" '$1 == c { print $2; exit }' "$PINS_FILE")
-  [[ $pin =~ ^[0-9a-f]{40}$ ]] ||
-    fail "No tested Hypr-DarkWindow commit for this Hyprland version ($(hyprctl version -j | jq -r .tag)) yet. Update Alpha Black to get one."
+  local build_key=$1 hypr_commit=${1%% *}
+  grep -q "^$hypr_commit\b" "$SUPPORTED_FILE" ||
+    fail "This Hyprland version ($(hyprctl version -j | jq -r .tag)) isn't supported yet. Update Alpha Black to get support for it."
 
   for dep in git make g++ pkg-config; do
     command -v "$dep" >/dev/null || fail "Building Hypr-DarkWindow needs $dep"
@@ -69,19 +68,17 @@ build_darkwindow() {
     git init -q "$DARKWINDOW_SRC" && git -C "$DARKWINDOW_SRC" remote add origin "$DARKWINDOW_REPO" ||
       fail "Failed to set up $DARKWINDOW_SRC"
   fi
-  git -C "$DARKWINDOW_SRC" fetch -q --depth 1 origin "$pin" || fail "Failed to fetch Hypr-DarkWindow $pin"
-  git -C "$DARKWINDOW_SRC" checkout -q --detach -f "$pin" || fail "Failed to check out Hypr-DarkWindow $pin"
-  [[ $(git -C "$DARKWINDOW_SRC" rev-parse HEAD) == "$pin" ]] || fail "Hypr-DarkWindow checkout doesn't match $pin"
 
-  if ! git -C "$DARKWINDOW_SRC" apply "$GLASS_PATCH" 2>/dev/null; then
-    patched=unpatched
-    notify-send "Alpha Black" "The glass patch doesn't apply to this Hypr-DarkWindow version. Frost will be all-or-nothing and won't blur every app."
-  fi
-
-  make -C "$DARKWINDOW_SRC" clean >/dev/null
-  make -C "$DARKWINDOW_SRC" -j"$(nproc)" all >/dev/null 2>&1 ||
+  # One && chain from fetch to build, so a failed fetch, checkout or patch
+  # can never fall through to building whatever else is in the folder. The
+  # commit is spelled out (not a variable) so it can be checked statically.
+  git -C "$DARKWINDOW_SRC" fetch -q --depth 1 origin a3f37e92562a3d02183ac20c36f6202694d486fe &&
+    git -C "$DARKWINDOW_SRC" checkout -q -f --detach a3f37e92562a3d02183ac20c36f6202694d486fe &&
+    git -C "$DARKWINDOW_SRC" apply "$GLASS_PATCH" &&
+    make -C "$DARKWINDOW_SRC" clean >/dev/null &&
+    make -C "$DARKWINDOW_SRC" -j"$(nproc)" all >/dev/null 2>&1 ||
     fail "Building Hypr-DarkWindow failed, run 'make -C $DARKWINDOW_SRC' to see why"
-  echo "$build_key $patched" >"$BUILT_FOR"
+  echo "$build_key patched" >"$BUILT_FOR"
 }
 
 ensure_darkwindow() {
@@ -95,7 +92,8 @@ ensure_darkwindow() {
 
   record_install
   local build_key
-  build_key="$(hyprctl version -j | jq -r '.commit') $(sha256sum "$GLASS_PATCH" | cut -c1-16)"
+  # Rebuilt when Hyprland, the glass patch or the pinned commit changes.
+  build_key="$(hyprctl version -j | jq -r '.commit') $({ cat "$GLASS_PATCH"; grep -o -- '--detach [0-9a-f]\{40\}' "${BASH_SOURCE[0]}"; } | sha256sum | cut -c1-16)"
   if [[ ! -f $DARKWINDOW_SO || $(cut -d' ' -f1,2 "$BUILT_FOR" 2>/dev/null) != "$build_key" ]]; then
     build_darkwindow "$build_key"
   fi
@@ -241,7 +239,7 @@ uninstall() {
     while read -r addr state config <&3; do
       [[ $state == on ]] && dispatch "$addr" "$(shader_args $config)" 0
     done 3< <(cat "$STATE_FILE" 2>/dev/null)
-    [[ $loaded == patched || $loaded == unpatched ]] && hyprctl plugin unload "$DARKWINDOW_SO" >/dev/null
+    [[ $loaded == patched ]] && hyprctl plugin unload "$DARKWINDOW_SO" >/dev/null
   fi
 
   if [[ $(jq -r '.darkwindow_source_preexisting' "$INSTALL_FILE" 2>/dev/null) == false ]]; then
