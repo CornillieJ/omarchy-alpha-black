@@ -56,9 +56,10 @@ o.bind(hyper .. "B", "Alpha Black", "~/.config/omarchy/plugins/jeffrey.alpha-bla
 The transparency is done by the
 [Hypr-DarkWindow](https://github.com/micha4w/Hypr-DarkWindow) Hyprland
 plugin. You don't install it yourself. Alpha Black clones it into
-`~/.local/share/hypr-darkwindow` and builds the commit that matches your
+`~/.local/share/hypr-darkwindow` and builds the commit pinned for your
 Hyprland version. It does this on first use and again after every Hyprland
-update.
+update. A brand new Hyprland release needs an Alpha Black update with its
+pin first; until then you get a notification instead of a build.
 
 Building needs `git`, `make`, `g++`, `pkg-config` and the Hyprland headers.
 All of them come with a standard Omarchy install. `hyprpicker` (also
@@ -98,15 +99,11 @@ Alpha Black does something you might not expect.
 
 **It builds and loads a Hyprland plugin at runtime.** Hypr-DarkWindow is a
 compiled `.so` that only loads into the exact Hyprland build it was compiled
-against. Alpha Black builds it from a pinned commit:
-
-- first from its own list of tested pins
-  ([`darkwindow-pins`](darkwindow-pins))
-- then from the pin Hypr-DarkWindow publishes for your Hyprland release in
-  its `hyprpm.toml`
-
-It never builds an unpinned branch. If neither list knows your Hyprland
-version, you get a notification instead of a build.
+against. Alpha Black only builds the exact commit listed for your Hyprland
+build in [`darkwindow-pins`](darkwindow-pins). It fetches just that commit,
+checks it out detached and verifies it before building, so it never builds
+a moving branch. If your Hyprland version isn't listed yet, you get a
+notification instead of a build.
 
 The `.so` is loaded the first time you use Alpha Black in a session, never
 from your Hyprland config. A plugin that breaks after a Hyprland update

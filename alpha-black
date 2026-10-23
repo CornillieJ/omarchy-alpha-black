@@ -49,12 +49,14 @@ record_install() {
 
 # The .so only loads into the exact Hyprland build it was compiled against, so
 # it's (re)built whenever the running Hyprland commit or the glass patch
-# changes. Only pinned commits are built: first the ones tested with this
-# plugin (darkwindow-pins), then the one Hypr-DarkWindow's hyprpm.toml pins for
-# that Hyprland release. Its main branch tracks Hyprland git, so it's never
-# built as a fallback.
+# changes. Only the exact commit pinned for that Hyprland build in
+# darkwindow-pins is fetched and built, so what runs is what was reviewed.
 build_darkwindow() {
   local build_key=$1 hypr_commit=${1%% *} pin patched=patched
+  pin=$(awk -v c="$hypr_commit" '$1 == c { print $2; exit }' "$PINS_FILE")
+  [[ $pin =~ ^[0-9a-f]{40}$ ]] ||
+    fail "No tested Hypr-DarkWindow commit for this Hyprland version ($(hyprctl version -j | jq -r .tag)) yet. Update Alpha Black to get one."
+
   for dep in git make g++ pkg-config; do
     command -v "$dep" >/dev/null || fail "Building Hypr-DarkWindow needs $dep"
   done
@@ -64,15 +66,12 @@ build_darkwindow() {
   notify-send "Alpha Black" "Building Hypr-DarkWindow for this Hyprland version…"
 
   if [[ ! -d $DARKWINDOW_SRC/.git ]]; then
-    git clone -q "$DARKWINDOW_REPO" "$DARKWINDOW_SRC" || fail "Failed to clone $DARKWINDOW_REPO"
+    git init -q "$DARKWINDOW_SRC" && git -C "$DARKWINDOW_SRC" remote add origin "$DARKWINDOW_REPO" ||
+      fail "Failed to set up $DARKWINDOW_SRC"
   fi
-  git -C "$DARKWINDOW_SRC" fetch -q origin || fail "Failed to fetch Hypr-DarkWindow"
-
-  pin=$(awk -v c="$hypr_commit" '$1 == c { print $2; exit }' "$PINS_FILE")
-  [[ -n $pin ]] || pin=$(git -C "$DARKWINDOW_SRC" show origin/main:hyprpm.toml |
-    grep -oP "\[\"$hypr_commit\", \"\K[0-9a-f]{40}")
-  [[ -n $pin ]] || fail "Hypr-DarkWindow has no release for this Hyprland version ($(hyprctl version -j | jq -r .tag)) yet. Update Alpha Black, or try again after Hypr-DarkWindow catches up."
-  git -C "$DARKWINDOW_SRC" checkout -q -f "$pin" || fail "Failed to check out Hypr-DarkWindow $pin"
+  git -C "$DARKWINDOW_SRC" fetch -q --depth 1 origin "$pin" || fail "Failed to fetch Hypr-DarkWindow $pin"
+  git -C "$DARKWINDOW_SRC" checkout -q --detach -f "$pin" || fail "Failed to check out Hypr-DarkWindow $pin"
+  [[ $(git -C "$DARKWINDOW_SRC" rev-parse HEAD) == "$pin" ]] || fail "Hypr-DarkWindow checkout doesn't match $pin"
 
   if ! git -C "$DARKWINDOW_SRC" apply "$GLASS_PATCH" 2>/dev/null; then
     patched=unpatched
