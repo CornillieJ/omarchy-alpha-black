@@ -146,9 +146,14 @@ toggle() {
 set_config() {
   local addr=$1 state old_config old_glass args old_args
   shift
-  [[ -n $addr && $# -eq 6 ]] || fail "Usage: alpha-black set ADDR R G B TOL GLASS FROST"
-  local config="$*" glass=$5
+  [[ -n $addr && $# -ge 4 ]] || fail "Usage: alpha-black set ADDR R G B TOL [GLASS FROST]"
   read -r state old_config <<<"$(read_state "$addr")"
+  # Fields left off keep their current value, so an editor still running an
+  # older version of this plugin keeps working.
+  local new=("$@") old
+  read -ra old <<<"$old_config"
+  local config="${new[*]} ${old[*]:${#new[@]}}" glass
+  glass=$(cut -d' ' -f5 <<<"$config")
   old_glass=$(cut -d' ' -f5 <<<"$old_config")
   args=$(shader_args $config)
   old_args=$(shader_args $old_config)
