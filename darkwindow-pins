@@ -1,0 +1,7 @@
+# Hypr-DarkWindow commit to build for each Hyprland commit, checked to build
+# and run with hypr-darkwindow-glass.patch. Hyprland commits missing here fall
+# back to the pin in Hypr-DarkWindow's own hyprpm.toml.
+# <hyprland commit>                       <hypr-darkwindow commit>                  # hyprland
+36b2e0cfe0c6094dbc47bd42a437431315bb3087 a3f37e92562a3d02183ac20c36f6202694d486fe # v0.56.0
+5c9377c15f85c50648f35ca5a213754f95b93ca0 a3f37e92562a3d02183ac20c36f6202694d486fe # v0.56.1
+efb50993780079460b0cbed1363e2166a2de1d9f a3f37e92562a3d02183ac20c36f6202694d486fe # v0.56.2

@@ -1,71 +1,103 @@
 #!/usr/bin/env bash
-# Make a color (black by default) in a window transparent via the
+# Make a color (black by default) in a window see-through via the
 # Hypr-DarkWindow Hyprland plugin's chromakey shader.
 #
 #   alpha-black                       toggle the focused window; turning it on
-#                                     also opens the color/tolerance editor
-#   alpha-black set ADDR R G B TOL GLASS FROST
-#                                     apply color (0-255), tolerance, glass
-#                                     (1 = blur behind the transparent area) and
-#                                     frost (0-1, how much of that blur shows),
+#                                     also opens the editor
+#   alpha-black set ADDR R G B TOL FROST
+#                                     apply color (0-255), tolerance and frost
+#                                     (0-1, how much blur shows through),
 #                                     enabling it
+#   alpha-black uninstall [--yes]     remove the plugin and everything it added
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ID=$(jq -r '.id // "jeffrey.alpha-black"' "$PLUGIN_DIR/manifest.json" 2>/dev/null)
+MENU_FILE="$HOME/.config/omarchy/extensions/omarchy-menu.jsonc"
+MENU_KEY="trigger.alphablack"
+
 DARKWINDOW_REPO="https://github.com/micha4w/Hypr-DarkWindow"
 DARKWINDOW_SRC="${XDG_DATA_HOME:-$HOME/.local/share}/hypr-darkwindow"
 DARKWINDOW_SO="$DARKWINDOW_SRC/out/hypr-darkwindow.so"
-BUILT_FOR="$DARKWINDOW_SRC/out/.built-for-hyprland"
+BUILT_FOR="$DARKWINDOW_SRC/out/.alpha-black-build"
 GLASS_PATCH="$PLUGIN_DIR/hypr-darkwindow-glass.patch"
-STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/alpha-black.state"
-DEFAULT_CONFIG="0 0 0 0.10 0 0.50"
+PINS_FILE="$PLUGIN_DIR/darkwindow-pins"
+
+# What this plugin added to the system, so uninstall removes only that.
+INSTALL_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/alpha-black"
+INSTALL_FILE="$INSTALL_DIR/install.json"
+
+# Per-session state: windows' settings, and how Hypr-DarkWindow got loaded.
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}/alpha-black"
+STATE_FILE="$RUNTIME_DIR/windows"
+LOADED_FILE="$RUNTIME_DIR/darkwindow"
+
+DEFAULT_CONFIG="0 0 0 0.10 0"
 
 fail() {
   notify-send -u critical "Alpha Black" "$1"
+  echo "alpha-black: $1" >&2
   exit 1
 }
 
+record_install() {
+  [[ -f $INSTALL_FILE ]] && return
+  mkdir -p "$INSTALL_DIR"
+  local preexisting=false
+  [[ -e $DARKWINDOW_SRC ]] && preexisting=true
+  jq -n --argjson preexisting "$preexisting" '{darkwindow_source_preexisting: $preexisting}' >"$INSTALL_FILE"
+}
+
 # The .so only loads into the exact Hyprland build it was compiled against, so
-# it's (re)built whenever the running Hyprland commit changes. Hypr-DarkWindow's
-# main branch tracks Hyprland git; its hyprpm.toml pins the right commit for
-# each Hyprland release.
+# it's (re)built whenever the running Hyprland commit or the glass patch
+# changes. Only pinned commits are built: first the ones tested with this
+# plugin (darkwindow-pins), then the one Hypr-DarkWindow's hyprpm.toml pins for
+# that Hyprland release. Its main branch tracks Hyprland git, so it's never
+# built as a fallback.
 build_darkwindow() {
-  local build_key=$1 hypr_commit=${1%% *} pin
+  local build_key=$1 hypr_commit=${1%% *} pin patched=patched
   for dep in git make g++ pkg-config; do
     command -v "$dep" >/dev/null || fail "Building Hypr-DarkWindow needs $dep"
   done
   pkg-config --exists hyprland pixman-1 libdrm ||
     fail "Building Hypr-DarkWindow needs the Hyprland headers (pkg-config hyprland pixman-1 libdrm)"
 
-  notify-send "Alpha Black" "Building Hypr-DarkWindow for this Hyprland version, this takes a minute…"
+  notify-send "Alpha Black" "Building Hypr-DarkWindow for this Hyprland version…"
 
   if [[ ! -d $DARKWINDOW_SRC/.git ]]; then
     git clone -q "$DARKWINDOW_REPO" "$DARKWINDOW_SRC" || fail "Failed to clone $DARKWINDOW_REPO"
   fi
   git -C "$DARKWINDOW_SRC" fetch -q origin || fail "Failed to fetch Hypr-DarkWindow"
 
-  pin=$(git -C "$DARKWINDOW_SRC" show origin/main:hyprpm.toml |
+  pin=$(awk -v c="$hypr_commit" '$1 == c { print $2; exit }' "$PINS_FILE")
+  [[ -n $pin ]] || pin=$(git -C "$DARKWINDOW_SRC" show origin/main:hyprpm.toml |
     grep -oP "\[\"$hypr_commit\", \"\K[0-9a-f]{40}")
-  git -C "$DARKWINDOW_SRC" checkout -q -f "${pin:-origin/main}" || fail "Failed to check out Hypr-DarkWindow"
+  [[ -n $pin ]] || fail "Hypr-DarkWindow has no release for this Hyprland version ($(hyprctl version -j | jq -r .tag)) yet. Update Alpha Black, or try again after Hypr-DarkWindow catches up."
+  git -C "$DARKWINDOW_SRC" checkout -q -f "$pin" || fail "Failed to check out Hypr-DarkWindow $pin"
 
-  # Upstream only blurs behind shaded windows that don't use
-  # ext-background-effect themselves, so glass does nothing on e.g. foot.
-  git -C "$DARKWINDOW_SRC" apply "$GLASS_PATCH" 2>/dev/null ||
-    notify-send "Alpha Black" "Glass blur patch doesn't apply to this Hypr-DarkWindow version; glass may not blur every app"
+  if ! git -C "$DARKWINDOW_SRC" apply "$GLASS_PATCH" 2>/dev/null; then
+    patched=unpatched
+    notify-send "Alpha Black" "The glass patch doesn't apply to this Hypr-DarkWindow version. Frost will be all-or-nothing and won't blur every app."
+  fi
 
   make -C "$DARKWINDOW_SRC" clean >/dev/null
   make -C "$DARKWINDOW_SRC" -j"$(nproc)" all >/dev/null 2>&1 ||
     fail "Building Hypr-DarkWindow failed, run 'make -C $DARKWINDOW_SRC' to see why"
-  echo "$build_key" >"$BUILT_FOR"
+  echo "$build_key $patched" >"$BUILT_FOR"
 }
 
 ensure_darkwindow() {
-  hyprctl plugin list | grep -q "Hypr-DarkWindow" && return
+  mkdir -p "$RUNTIME_DIR"
+  if hyprctl plugin list | grep -q "Hypr-DarkWindow"; then
+    # Loaded by something other than this plugin, which is all the
+    # information there is about it, so assume it lacks the glass patch.
+    [[ -f $LOADED_FILE ]] || echo external >"$LOADED_FILE"
+    return
+  fi
 
-  # Rebuilt when either Hyprland or the glass patch changes.
+  record_install
   local build_key
   build_key="$(hyprctl version -j | jq -r '.commit') $(sha256sum "$GLASS_PATCH" | cut -c1-16)"
-  if [[ ! -f $DARKWINDOW_SO || $(cat "$BUILT_FOR" 2>/dev/null) != "$build_key" ]]; then
+  if [[ ! -f $DARKWINDOW_SO || $(cut -d' ' -f1,2 "$BUILT_FOR" 2>/dev/null) != "$build_key" ]]; then
     build_darkwindow "$build_key"
   fi
 
@@ -74,25 +106,35 @@ ensure_darkwindow() {
   hyprctl plugin load "$DARKWINDOW_SO" >/dev/null || fail "Failed to load Hypr-DarkWindow"
   # Its predefined shaders (chromakey) only register during a config load.
   hyprctl reload >/dev/null
+  cut -d' ' -f3 "$BUILT_FOR" >"$LOADED_FILE"
+}
+
+blur_amount_supported() {
+  [[ $(cat "$LOADED_FILE" 2>/dev/null) == patched ]]
 }
 
 # The plugin keys shaders by their full "id args" string and toggles off only
 # when the exact same string is dispatched again, so this must be deterministic
-# for a given config. Frost is how much of the glass blur shows through
-# (.blur_amount comes from hypr-darkwindow-glass.patch); without glass there is
-# no blur to blend, so it's left out.
+# for a given config. .blur_amount fades the blur behind the window and only
+# exists with hypr-darkwindow-glass.patch.
 shader_args() {
-  local r=$1 g=$2 b=$3 tol=$4 glass=$5 frost=$6
-  awk -v r="$r" -v g="$g" -v b="$b" -v t="$tol" -v glass="$glass" -v f="$frost" \
+  local r=$1 g=$2 b=$3 tol=$4 frost=$5 blur_amount=0
+  blur_amount_supported && blur_amount=1
+  awk -v r="$r" -v g="$g" -v b="$b" -v t="$tol" -v f="$frost" -v ba="$blur_amount" \
     'BEGIN {
       printf "bkg=[%.4f %.4f %.4f] similarity=%.3f amount=1.4 targetOpacity=0", r/255, g/255, b/255, t
-      if (glass == 1) printf " .blur_amount=%.2f", f
+      if (ba && f > 0) printf " .blur_amount=%.2f", f
     }'
 }
 
+# No frost means no blur at all, which also spares Hyprland blurring a
+# backdrop nobody sees.
+no_blur_for() {
+  awk -v f="$1" 'BEGIN { print (f > 0) ? 0 : 1 }'
+}
+
 # Each dispatch with new args replaces the window's shader; dispatching the
-# current args again removes it. Blur is off while shaded unless glass is
-# wanted, since a blurred backdrop hides the windows underneath.
+# current args again removes it.
 # Hyprland 0.56 parses `hyprctl dispatch` as Lua, so the plugin's legacy string
 # dispatchers aren't reachable that way.
 dispatch() {
@@ -106,16 +148,16 @@ set_blur() {
 }
 
 # The plugin exposes no way to read a window's shader, so on/off and the
-# per-window config are tracked here as "ADDR on|off R G B TOL GLASS FROST"
-# lines.
+# per-window config are tracked here as "ADDR on|off R G B TOL FROST" lines.
 read_state() {
   touch "$STATE_FILE"
-  local line fields defaults
+  local line
   line=$(grep -m1 "^$1 " "$STATE_FILE")
-  read -ra fields <<<"${line#* }"
-  read -ra defaults <<<"off $DEFAULT_CONFIG"
-  # Lines written by older versions lack the newer trailing fields.
-  echo "${fields[@]}" "${defaults[@]:${#fields[@]}}"
+  if [[ -n $line ]]; then
+    echo "${line#* }"
+  else
+    echo "off $DEFAULT_CONFIG"
+  fi
 }
 
 write_state() {
@@ -126,68 +168,105 @@ write_state() {
 }
 
 toggle() {
-  local window addr title state config
+  local window addr title state config r g b tol frost
   window=$(hyprctl activewindow -j)
   addr=$(jq -r '.address // empty' <<<"$window")
   [[ -n $addr ]] || fail "No focused window"
   title=$(jq -r '.title // ""' <<<"$window")
 
   read -r state config <<<"$(read_state "$addr")"
-  local r g b tol glass frost
-  read -r r g b tol glass frost <<<"$config"
+  read -r r g b tol frost <<<"$config"
   if [[ $state == on ]]; then
     dispatch "$addr" "$(shader_args $config)" 0
     write_state "$addr" off "$config"
     return
   fi
 
-  dispatch "$addr" "$(shader_args $config)" "$((1 - glass))"
+  dispatch "$addr" "$(shader_args $config)" "$(no_blur_for "$frost")"
   write_state "$addr" on "$config"
 
   # The address is resolved here, before the editor takes focus, so the editor
   # itself is never the target.
   local payload
   payload=$(jq -cn --arg address "$addr" --arg title "$title" \
-    --argjson r "$r" --argjson g "$g" --argjson b "$b" --argjson tol "$tol" \
-    --argjson glass "$glass" --argjson frost "$frost" \
-    '{address: $address, title: $title, r: $r, g: $g, b: $b, tolerance: $tol, glass: ($glass == 1), frost: $frost}')
+    --argjson r "$r" --argjson g "$g" --argjson b "$b" --argjson tol "$tol" --argjson frost "$frost" \
+    '{address: $address, title: $title, r: $r, g: $g, b: $b, tolerance: $tol, frost: $frost}')
   omarchy-shell -q shell summon "$PLUGIN_ID" "$payload"
 }
 
 set_config() {
-  local addr=$1 state old_config old_glass args old_args
+  local addr=$1 state old_config args old_args no_blur
   shift
-  [[ -n $addr && $# -ge 4 ]] || fail "Usage: alpha-black set ADDR R G B TOL [GLASS FROST]"
+  [[ -n $addr && $# -eq 5 ]] || fail "Usage: alpha-black set ADDR R G B TOL FROST"
+  local config="$*" frost=$5
   read -r state old_config <<<"$(read_state "$addr")"
-  # Fields left off keep their current value, so an editor still running an
-  # older version of this plugin keeps working.
-  local new=("$@") old
-  read -ra old <<<"$old_config"
-  local config="${new[*]} ${old[*]:${#new[@]}}" glass
-  glass=$(cut -d' ' -f5 <<<"$config")
-  old_glass=$(cut -d' ' -f5 <<<"$old_config")
   args=$(shader_args $config)
   old_args=$(shader_args $old_config)
+  no_blur=$(no_blur_for "$frost")
   if [[ $state == on && $args == "$old_args" ]]; then
-    [[ $glass == "$old_glass" ]] && return
     # Same shader: re-dispatching it would toggle it off, so only blur changes.
-    set_blur "$addr" "$((1 - glass))"
+    [[ $no_blur != "$(no_blur_for "${old_config##* }")" ]] && set_blur "$addr" "$no_blur"
   else
-    dispatch "$addr" "$args" "$((1 - glass))"
+    dispatch "$addr" "$args" "$no_blur"
   fi
   write_state "$addr" on "$config"
 }
 
+# Removes the menu row the editor added, then checks the file still parses
+# the way the shell parses it (full-line comments and trailing commas
+# stripped), putting it back untouched if not.
+remove_menu_entry() {
+  [[ -f $MENU_FILE ]] && grep -q "\"$MENU_KEY\"" "$MENU_FILE" || return 0
+  local backup
+  backup=$(mktemp)
+  cp "$MENU_FILE" "$backup"
+  perl -0pi -e '
+    s/,\s*"\Q'"$MENU_KEY"'\E"\s*:\s*\{[^{}]*\}//s or
+    s/"\Q'"$MENU_KEY"'\E"\s*:\s*\{[^{}]*\}\s*,?//s
+  ' "$MENU_FILE"
+  if ! sed -E '/^\s*\/\//d' "$MENU_FILE" | perl -0pe 's/,(\s*[}\]])/$1/g' | jq -e . >/dev/null 2>&1; then
+    cp "$backup" "$MENU_FILE"
+    echo "Couldn't remove the \"$MENU_KEY\" entry from $MENU_FILE cleanly; remove it by hand." >&2
+  fi
+  rm -f "$backup"
+}
+
+uninstall() {
+  omarchy plugin remove "$PLUGIN_ID" "$@" || exit 1
+
+  local loaded
+  loaded=$(cat "$LOADED_FILE" 2>/dev/null)
+  if hyprctl plugin list | grep -q "Hypr-DarkWindow"; then
+    local addr state config
+    while read -r addr state config <&3; do
+      [[ $state == on ]] && dispatch "$addr" "$(shader_args $config)" 0
+    done 3< <(cat "$STATE_FILE" 2>/dev/null)
+    [[ $loaded == patched || $loaded == unpatched ]] && hyprctl plugin unload "$DARKWINDOW_SO" >/dev/null
+  fi
+
+  if [[ $(jq -r '.darkwindow_source_preexisting' "$INSTALL_FILE" 2>/dev/null) == false ]]; then
+    rm -rf "$DARKWINDOW_SRC"
+    echo "Removed $DARKWINDOW_SRC"
+  elif [[ -d $DARKWINDOW_SRC ]]; then
+    echo "Kept $DARKWINDOW_SRC, it was there before Alpha Black"
+  fi
+
+  remove_menu_entry
+  rm -rf "$INSTALL_DIR" "$RUNTIME_DIR"
+  echo "Alpha Black uninstalled"
+}
+
+mkdir -p "$RUNTIME_DIR"
+
 # Live editing fires many `set` calls in a row; serialize them so state
 # reads/writes and dispatches can't interleave (and a first-use build only
 # runs once).
-exec 9>"$STATE_FILE.lock"
+exec 9>"$RUNTIME_DIR/lock"
 flock 9
 
-ensure_darkwindow
-
 case "${1:-toggle}" in
-  toggle) toggle ;;
-  set) shift; set_config "$@" ;;
+  toggle) ensure_darkwindow; toggle ;;
+  set) ensure_darkwindow; shift; set_config "$@" ;;
+  uninstall) shift; uninstall "$@" ;;
   *) fail "Unknown command: $1" ;;
 esac

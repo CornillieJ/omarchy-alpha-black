@@ -28,8 +28,7 @@ Item {
   property int g: 0
   property int b: 0
   property real tolerance: 0.1
-  property bool glass: false
-  property real frost: 0.5
+  property real frost: 0
 
   readonly property string hex: "#" + [r, g, b].map(function(v) {
     return (v < 16 ? "0" : "") + v.toString(16)
@@ -56,8 +55,7 @@ Item {
     root.g = args.g || 0
     root.b = args.b || 0
     root.tolerance = args.tolerance !== undefined ? args.tolerance : 0.1
-    root.glass = args.glass === true
-    root.frost = args.frost !== undefined ? args.frost : 0.5
+    root.frost = args.frost !== undefined ? args.frost : 0
     root.picking = false
     root.opened = true
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -86,7 +84,7 @@ Item {
       return
     }
     applyProc.command = [root.script, "set", root.address,
-      String(root.r), String(root.g), String(root.b), root.tolerance.toFixed(3), root.glass ? "1" : "0", root.frost.toFixed(2)]
+      String(root.r), String(root.g), String(root.b), root.tolerance.toFixed(3), root.frost.toFixed(2)]
     applyProc.running = true
   }
 
@@ -280,10 +278,6 @@ Item {
           } else if (event.key === Qt.Key_P) {
             root.startPick()
             event.accepted = true
-          } else if (event.key === Qt.Key_G) {
-            root.glass = !root.glass
-            root.apply()
-            event.accepted = true
           }
         }
       }
@@ -367,16 +361,7 @@ Item {
           onMoved: function(v) { root.tolerance = Math.round(v * 100) / 100; root.apply() }
         }
 
-        Toggle {
-          width: parent.width
-          label: "Glass"
-          description: "Blur what shows through; Frost sets how much"
-          checked: root.glass
-          onClicked: { root.glass = !root.glass; root.apply() }
-        }
-
         ChannelRow {
-          visible: root.glass
           label: "Frost"
           value: root.frost
           minimum: 0
@@ -387,36 +372,51 @@ Item {
           onMoved: function(v) { root.frost = Math.round(v * 100) / 100; root.apply() }
         }
 
-        Row {
-          anchors.right: parent.right
-          spacing: root.contentSpacing
+        Item {
+          width: parent.width
+          height: buttons.height
 
-          Button {
-            text: "Pick from screen"
-            iconText: "󰈊"
-            bordered: true
-            tooltipText: "P"
-            onClicked: root.startPick()
+          Text {
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Enter to close"
+            color: root.foreground
+            opacity: 0.5
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
           }
 
-          Button {
-            text: "Reset"
-            bordered: true
-            onClicked: {
-              root.r = 0
-              root.g = 0
-              root.b = 0
-              root.tolerance = 0.1
-              root.glass = false
-              root.frost = 0.5
-              root.apply()
+          Row {
+            id: buttons
+            anchors.right: parent.right
+            spacing: root.contentSpacing
+
+            Button {
+              text: "Pick from screen"
+              iconText: "󰈊"
+              bordered: true
+              tooltipText: "P"
+              onClicked: root.startPick()
             }
-          }
 
-          Button {
-            text: "Done"
-            bordered: true
-            onClicked: root.dismiss()
+            Button {
+              text: "Reset"
+              bordered: true
+              onClicked: {
+                root.r = 0
+                root.g = 0
+                root.b = 0
+                root.tolerance = 0.1
+                root.frost = 0
+                root.apply()
+              }
+            }
+
+            Button {
+              text: "Done"
+              bordered: true
+              onClicked: root.dismiss()
+            }
           }
         }
       }
