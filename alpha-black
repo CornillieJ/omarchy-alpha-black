@@ -222,7 +222,8 @@ remove_menu_entry() {
   cp "$MENU_FILE" "$backup"
   perl -0pi -e '
     s/,\s*"\Q'"$MENU_KEY"'\E"\s*:\s*\{[^{}]*\}//s or
-    s/"\Q'"$MENU_KEY"'\E"\s*:\s*\{[^{}]*\}\s*,?//s
+    s/"\Q'"$MENU_KEY"'\E"\s*:\s*\{[^{}]*\}\s*,?//s;
+    s/\n[ \t]*\n(\}\s*)\z/\n$1/
   ' "$MENU_FILE"
   if ! sed -E '/^\s*\/\//d' "$MENU_FILE" | perl -0pe 's/,(\s*[}\]])/$1/g' | jq -e . >/dev/null 2>&1; then
     cp "$backup" "$MENU_FILE"

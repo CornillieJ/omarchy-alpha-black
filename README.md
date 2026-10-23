@@ -84,6 +84,10 @@ This asks for confirmation, then:
   by hand.
 - deletes its own state in `~/.local/state/alpha-black`
 
+Omarchy keeps a copy of the removed plugin folder at
+`~/.config/omarchy/plugins/.jeffrey.alpha-black.bak.<time>`; delete it if
+you don't want it.
+
 `omarchy plugin remove jeffrey.alpha-black` on its own removes only the
 plugin folder and leaves the rest behind.
 
