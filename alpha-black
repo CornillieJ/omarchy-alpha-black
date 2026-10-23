@@ -7,7 +7,7 @@
 #   alpha-black set ADDR R G B TOL GLASS FROST
 #                                     apply color (0-255), tolerance, glass
 #                                     (1 = blur behind the transparent area) and
-#                                     frost (0-0.9 opacity kept over that blur),
+#                                     frost (0-1, how much of that blur shows),
 #                                     enabling it
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,8 +16,9 @@ DARKWINDOW_REPO="https://github.com/micha4w/Hypr-DarkWindow"
 DARKWINDOW_SRC="${XDG_DATA_HOME:-$HOME/.local/share}/hypr-darkwindow"
 DARKWINDOW_SO="$DARKWINDOW_SRC/out/hypr-darkwindow.so"
 BUILT_FOR="$DARKWINDOW_SRC/out/.built-for-hyprland"
+GLASS_PATCH="$PLUGIN_DIR/hypr-darkwindow-glass.patch"
 STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/alpha-black.state"
-DEFAULT_CONFIG="0 0 0 0.10 0 0.30"
+DEFAULT_CONFIG="0 0 0 0.10 0 0.50"
 
 fail() {
   notify-send -u critical "Alpha Black" "$1"
@@ -29,7 +30,7 @@ fail() {
 # main branch tracks Hyprland git; its hyprpm.toml pins the right commit for
 # each Hyprland release.
 build_darkwindow() {
-  local hypr_commit=$1 pin
+  local build_key=$1 hypr_commit=${1%% *} pin
   for dep in git make g++ pkg-config; do
     command -v "$dep" >/dev/null || fail "Building Hypr-DarkWindow needs $dep"
   done
@@ -45,21 +46,27 @@ build_darkwindow() {
 
   pin=$(git -C "$DARKWINDOW_SRC" show origin/main:hyprpm.toml |
     grep -oP "\[\"$hypr_commit\", \"\K[0-9a-f]{40}")
-  git -C "$DARKWINDOW_SRC" checkout -q "${pin:-origin/main}" || fail "Failed to check out Hypr-DarkWindow"
+  git -C "$DARKWINDOW_SRC" checkout -q -f "${pin:-origin/main}" || fail "Failed to check out Hypr-DarkWindow"
+
+  # Upstream only blurs behind shaded windows that don't use
+  # ext-background-effect themselves, so glass does nothing on e.g. foot.
+  git -C "$DARKWINDOW_SRC" apply "$GLASS_PATCH" 2>/dev/null ||
+    notify-send "Alpha Black" "Glass blur patch doesn't apply to this Hypr-DarkWindow version; glass may not blur every app"
 
   make -C "$DARKWINDOW_SRC" clean >/dev/null
   make -C "$DARKWINDOW_SRC" -j"$(nproc)" all >/dev/null 2>&1 ||
     fail "Building Hypr-DarkWindow failed, run 'make -C $DARKWINDOW_SRC' to see why"
-  echo "$hypr_commit" >"$BUILT_FOR"
+  echo "$build_key" >"$BUILT_FOR"
 }
 
 ensure_darkwindow() {
   hyprctl plugin list | grep -q "Hypr-DarkWindow" && return
 
-  local hypr_commit
-  hypr_commit=$(hyprctl version -j | jq -r '.commit')
-  if [[ ! -f $DARKWINDOW_SO || $(cat "$BUILT_FOR" 2>/dev/null) != "$hypr_commit" ]]; then
-    build_darkwindow "$hypr_commit"
+  # Rebuilt when either Hyprland or the glass patch changes.
+  local build_key
+  build_key="$(hyprctl version -j | jq -r '.commit') $(sha256sum "$GLASS_PATCH" | cut -c1-16)"
+  if [[ ! -f $DARKWINDOW_SO || $(cat "$BUILT_FOR" 2>/dev/null) != "$build_key" ]]; then
+    build_darkwindow "$build_key"
   fi
 
   # Loaded lazily on first use rather than from hyprland.lua, so a plugin that
@@ -71,12 +78,16 @@ ensure_darkwindow() {
 
 # The plugin keys shaders by their full "id args" string and toggles off only
 # when the exact same string is dispatched again, so this must be deterministic
-# for a given config. Frost keeps matched pixels partly opaque over the blur;
-# without glass they go fully clear.
+# for a given config. Frost is how much of the glass blur shows through
+# (.blur_amount comes from hypr-darkwindow-glass.patch); without glass there is
+# no blur to blend, so it's left out.
 shader_args() {
   local r=$1 g=$2 b=$3 tol=$4 glass=$5 frost=$6
-  awk -v r="$r" -v g="$g" -v b="$b" -v t="$tol" -v o="$([[ $glass == 1 ]] && echo "$frost" || echo 0)" \
-    'BEGIN { printf "bkg=[%.4f %.4f %.4f] similarity=%.3f amount=1.4 targetOpacity=%.2f", r/255, g/255, b/255, t, o }'
+  awk -v r="$r" -v g="$g" -v b="$b" -v t="$tol" -v glass="$glass" -v f="$frost" \
+    'BEGIN {
+      printf "bkg=[%.4f %.4f %.4f] similarity=%.3f amount=1.4 targetOpacity=0", r/255, g/255, b/255, t
+      if (glass == 1) printf " .blur_amount=%.2f", f
+    }'
 }
 
 # Each dispatch with new args replaces the window's shader; dispatching the

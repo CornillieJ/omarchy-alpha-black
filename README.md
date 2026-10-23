@@ -12,10 +12,9 @@ tune it live while you watch the window change:
   Near-matches fade out gradually, so antialiased text keeps clean edges.
 - **Glass**: blur what shows through, for a frosted/acrylic look instead of a
   clear cutout
-- **Frost** (with Glass on): how much of the color stays over the blur, from
-  0 (pure blurred glass) to 0.9 (mostly opaque, tinted acrylic). Blur strength
-  itself is Hyprland's global `decoration.blur` setting; Hyprland has no
-  per-window blur size.
+- **Frost** (with Glass on): how much of that blur shows, from 0 (clear,
+  the desktop stays sharp) to 1 (fully frosted). The blur radius itself is
+  Hyprland's global `decoration.blur` setting.
 - **Pick from screen** (`P`): grab the color with hyprpicker
 
 Press Enter (or Escape) to close the editor and keep the settings. Running it
@@ -39,6 +38,18 @@ Hyprland version and builds it. That needs `git`, `make`, `g++`,
 `pkg-config` and the Hyprland development headers, which come with Omarchy's
 `hyprland` package. Hypr-DarkWindow is loaded into Hyprland on first use only,
 never from your Hyprland config, so it can't break your session at login.
+
+Before building, Alpha Black applies a small patch
+(`hypr-darkwindow-glass.patch`) to Hypr-DarkWindow that makes Glass work:
+
+- Apps that use the `ext-background-effect` protocol, like foot, only get blur
+  where they ask for it, and an opaque app asks for none. The patch blurs
+  behind any window whose shader makes it transparent.
+- It adds a `.blur_amount` shader property, which fades the blurred
+  background so Frost can go from clear to fully frosted.
+
+If a future Hypr-DarkWindow version no longer takes the patch, Alpha Black
+still builds it unpatched and tells you Glass may not blur every app.
 
 `hyprpicker` (shipped with Omarchy) is used for Pick from screen.
 

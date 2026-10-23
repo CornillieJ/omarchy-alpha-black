@@ -29,7 +29,7 @@ Item {
   property int b: 0
   property real tolerance: 0.1
   property bool glass: false
-  property real frost: 0.3
+  property real frost: 0.5
 
   readonly property string hex: "#" + [r, g, b].map(function(v) {
     return (v < 16 ? "0" : "") + v.toString(16)
@@ -57,7 +57,7 @@ Item {
     root.b = args.b || 0
     root.tolerance = args.tolerance !== undefined ? args.tolerance : 0.1
     root.glass = args.glass === true
-    root.frost = args.frost !== undefined ? args.frost : 0.3
+    root.frost = args.frost !== undefined ? args.frost : 0.5
     root.picking = false
     root.opened = true
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -370,7 +370,7 @@ Item {
         Toggle {
           width: parent.width
           label: "Glass"
-          description: "Blur what shows through; Frost keeps some of the color over it"
+          description: "Blur what shows through; Frost sets how much"
           checked: root.glass
           onClicked: { root.glass = !root.glass; root.apply() }
         }
@@ -380,7 +380,7 @@ Item {
           label: "Frost"
           value: root.frost
           minimum: 0
-          maximum: 0.9
+          maximum: 1
           step: 0.05
           integer: false
           decimals: 2
@@ -408,7 +408,7 @@ Item {
               root.b = 0
               root.tolerance = 0.1
               root.glass = false
-              root.frost = 0.3
+              root.frost = 0.5
               root.apply()
             }
           }

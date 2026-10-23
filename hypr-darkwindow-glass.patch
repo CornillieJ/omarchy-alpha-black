@@ -1,0 +1,149 @@
+diff --git a/src/CustomShader.h b/src/CustomShader.h
+index 0fc4d5f..c5fd4ec 100644
+--- a/src/CustomShader.h
++++ b/src/CustomShader.h
+@@ -80,6 +80,7 @@ struct ShaderInstance
+     IntroducesTransparency Transparency = IntroducesTransparency::No;
+     float FadeInSpeed = 0.f, FadeOutSpeed = 0.f;
+     float AnimationInterval = 0.f;
++    float BlurAmount = 1.f;
+ };
+ 
+ 
+diff --git a/src/Hooks.cpp b/src/Hooks.cpp
+index 5fcfde1..7cacd51 100644
+--- a/src/Hooks.cpp
++++ b/src/Hooks.cpp
+@@ -3,6 +3,7 @@
+ 
+ #include "CustomShader.h"
+ #include "State.h"
++#include <hyprland/src/config/ConfigValue.hpp>
+ 
+ static ShadedElement* getShaderForSurfacePass(CSurfacePassElement* element)
+ {
+@@ -88,6 +89,15 @@ HOOK_FUNCTION(
+     g.RenderState.Active = g.RenderState.ShaderConfig && g.RenderState.Texture == tex;
+     Hyprutils::Utils::CScopeGuard _active([&] { g.RenderState.Active = false; });
+ 
++    // The blurred background is its own draw underneath the window; fading it
++    // lets the unblurred desktop show through (.blur_amount).
++    if (g.RenderState.ShaderConfig && g.RenderState.Texture != tex && g.RenderState.ShaderConfig->ActiveShader->BlurAmount < 1.f)
++    {
++        auto faded = data;
++        faded.a *= g.RenderState.ShaderConfig->ActiveShader->BlurAmount;
++        return original(thisptr, tex, box, faded);
++    }
++
+     original(thisptr, tex, box, data);
+ }
+ 
+@@ -127,4 +137,35 @@ HOOK_FUNCTION(
+         g.NotifyError(std::string("Failed to apply custom shader: ") + ex.what());
+         return original(thisptr, frag, features);
+     }
+-}
+\ No newline at end of file
++}
++
++// Clients using ext-background-effect (e.g. foot) only get blur where they ask
++// for it, and an opaque client asks for none. A shader that introduces
++// transparency still needs the blur behind it, unless no_blur is set.
++namespace _ns_shouldBlurWindow
++{
++    bool (*original)(Render::IHyprRenderer*, PHLWINDOW) = nullptr;
++    bool hook(Render::IHyprRenderer* thisptr, PHLWINDOW window)
++    {
++        if (original(thisptr, window))
++            return true;
++
++        static auto PBLUR = CConfigValue<Config::INTEGER>("decoration:blur:enabled");
++        if (!*PBLUR || thisptr->m_bRenderingSnapshot || !window || window->m_ruleApplicator->noBlur().valueOrDefault() ||
++            window->m_ruleApplicator->RGBX().valueOrDefault())
++            return false;
++
++        auto config = g.Manager.GetShaderForElement(window);
++        return config && config->ActiveShader->Transparency;
++    }
++    auto registerShouldBlurWindow = []
++    {
++        g.Hooks.push_back(
++            { "Render::IHyprRenderer",
++              "shouldBlur(Hyprutils::Memory::CSharedPointer<Desktop::View::CWindow>)",
++              (void**) &original,
++              (void*) hook }
++        );
++        return true;
++    }();
++}
+diff --git a/src/LuaCallbacks.cpp b/src/LuaCallbacks.cpp
+index 07e3154..e59981a 100644
+--- a/src/LuaCallbacks.cpp
++++ b/src/LuaCallbacks.cpp
+@@ -107,7 +107,7 @@ static std::expected<std::string, std::string> luaShaderToString(lua_State* L, i
+ 
+     std::string out = std::move(*shader);
+ 
+-    for (auto& field : { "fade_in_speed", "fade_out_speed", "animation_interval" })
++    for (auto& field : { "fade_in_speed", "fade_out_speed", "animation_interval", "blur_amount" })
+     {
+         lua_getfield(L, idx, field);
+         if (lua_isnil(L, -1))
+diff --git a/src/ShadeManager.cpp b/src/ShadeManager.cpp
+index 195f9ce..f779751 100644
+--- a/src/ShadeManager.cpp
++++ b/src/ShadeManager.cpp
+@@ -113,6 +113,8 @@ ShaderDefinition ShaderDefinition::Parse(const std::string& shader)
+                 out.FadeOutSpeed = values[0];
+             else if (name == ".animation_interval")
+                 out.AnimationInterval = values[0];
++            else if (name == ".blur_amount")
++                out.BlurAmount = std::clamp(values[0], 0.f, 1.f);
+             else
+                 throw g.Efmt("unknown special shader uniform '{}'", name);
+         }
+@@ -173,6 +175,8 @@ ShaderInstance* ShadeManager::AddShader(ShaderDefinition&& def)
+         shader.FadeOutSpeed = *def.FadeOutSpeed;
+     if (def.AnimationInterval)
+         shader.AnimationInterval = *def.AnimationInterval;
++    if (def.BlurAmount)
++        shader.BlurAmount = *def.BlurAmount;
+ 
+     try
+     {
+diff --git a/src/ShadeManager.h b/src/ShadeManager.h
+index 9149a4f..cbce8ba 100644
+--- a/src/ShadeManager.h
++++ b/src/ShadeManager.h
+@@ -16,6 +16,7 @@ struct ShaderDefinition
+     IntroducesTransparency Transparency;
+     std::optional<float> FadeInSpeed, FadeOutSpeed;
+     std::optional<float> AnimationInterval;
++    std::optional<float> BlurAmount;
+ 
+     static ShaderDefinition Parse(const std::string& shader);
+ };
+diff --git a/src/State.h b/src/State.h
+index 1835be1..59398df 100644
+--- a/src/State.h
++++ b/src/State.h
+@@ -127,12 +127,17 @@ struct State
+     {
+         for (auto& hook : Hooks)
+         {
+-            auto all = HyprlandAPI::findFunctionsByName(Handle, hook.methodName);
++            // A methodName carrying its parameter list picks one overload exactly.
++            bool exact = hook.methodName.contains('(');
++            auto all = HyprlandAPI::findFunctionsByName(Handle, hook.methodName.substr(0, hook.methodName.find('(')));
+             auto found = std::find_if(
+                 all.begin(),
+                 all.end(),
+                 [&](const SFunctionMatch& line)
+-                { return line.demangled.starts_with(hook.className + "::" + hook.methodName + "("); }
++                {
++                    return exact ? line.demangled == hook.className + "::" + hook.methodName
++                                 : line.demangled.starts_with(hook.className + "::" + hook.methodName + "(");
++                }
+             );
+ 
+             if (found == all.end())
