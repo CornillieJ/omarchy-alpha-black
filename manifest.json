@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "jeffrey.alpha-black",
+  "name": "Alpha Black",
+  "version": "1.0.0",
+  "author": "Jeffrey Cornillie",
+  "description": "Make black (or any color) in a window see-through, with a live color, tolerance and glass-blur editor",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "AlphaBlack.qml"
+  }
+}
