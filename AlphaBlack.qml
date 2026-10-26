@@ -94,6 +94,7 @@ Item {
 
   // Going back to one window turns the effect off everywhere else.
   function setScope(value) {
+    if (root.allWindows === (value === "all")) return
     root.allWindows = value === "all"
     if (root.allWindows) {
       root.apply()
@@ -391,17 +392,25 @@ Item {
           onMoved: function(v) { root.frost = Math.round(v * 100) / 100; root.apply() }
         }
 
-        ButtonGroup {
-          options: [
-            { value: "focused", label: "Focused window" },
-            { value: "all", label: "All windows" }
-          ]
-          value: root.allWindows ? "all" : "focused"
-          focusable: false
-          foreground: root.foreground
-          background: root.background
-          fontFamily: root.fontFamily
-          onChanged: function(v) { root.setScope(v) }
+        // `active` fills the chosen button; `selected` would also recolor its text to match the fill.
+        Row {
+          spacing: root.contentSpacing
+
+          Button {
+            text: "Focused window"
+            bordered: true
+            active: !root.allWindows
+            foreground: root.foreground
+            onClicked: root.setScope("focused")
+          }
+
+          Button {
+            text: "All windows"
+            bordered: true
+            active: root.allWindows
+            foreground: root.foreground
+            onClicked: root.setScope("all")
+          }
         }
 
         Item {
