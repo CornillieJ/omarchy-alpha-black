@@ -19,6 +19,7 @@ Item {
   property bool opened: false
   property bool picking: false
   property bool pendingApply: false
+  property bool allWindows: false
 
   // The target is fixed when the editor opens (by `alpha-black` turning a
   // window on), so the editor taking focus never redirects edits to itself.
@@ -57,6 +58,7 @@ Item {
     root.tolerance = args.tolerance !== undefined ? args.tolerance : 0.1
     root.frost = args.frost !== undefined ? args.frost : 0
     root.picking = false
+    root.allWindows = false
     root.opened = true
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
@@ -83,9 +85,22 @@ Item {
       root.pendingApply = true
       return
     }
-    applyProc.command = [root.script, "set", root.address,
-      String(root.r), String(root.g), String(root.b), root.tolerance.toFixed(3), root.frost.toFixed(2)]
+    var values = [String(root.r), String(root.g), String(root.b), root.tolerance.toFixed(3), root.frost.toFixed(2)]
+    applyProc.command = root.allWindows
+      ? [root.script, "set-all"].concat(values)
+      : [root.script, "set", root.address].concat(values)
     applyProc.running = true
+  }
+
+  // Going back to one window turns the effect off everywhere else.
+  function setScope(value) {
+    root.allWindows = value === "all"
+    if (root.allWindows) {
+      root.apply()
+    } else {
+      releaseProc.command = [root.script, "release-others", root.address]
+      releaseProc.running = true
+    }
   }
 
   function setColor(hexText) {
@@ -172,6 +187,10 @@ Item {
         root.apply()
       }
     }
+  }
+
+  Process {
+    id: releaseProc
   }
 
   Process {
@@ -322,7 +341,7 @@ Item {
             Text {
               width: parent.width
               textFormat: Text.PlainText
-              text: root.windowTitle
+              text: root.allWindows ? "All windows" : root.windowTitle
               color: root.foreground
               opacity: 0.6
               font.family: root.fontFamily
@@ -370,6 +389,19 @@ Item {
           integer: false
           decimals: 2
           onMoved: function(v) { root.frost = Math.round(v * 100) / 100; root.apply() }
+        }
+
+        ButtonGroup {
+          options: [
+            { value: "focused", label: "Focused window" },
+            { value: "all", label: "All windows" }
+          ]
+          value: root.allWindows ? "all" : "focused"
+          focusable: false
+          foreground: root.foreground
+          background: root.background
+          fontFamily: root.fontFamily
+          onChanged: function(v) { root.setScope(v) }
         }
 
         Item {

@@ -37,6 +37,7 @@ settings.
 | Editor control | What it does |
 |---|---|
 | Red / Green / Blue | The color that becomes see-through. Black by default. |
+| Focused window / All windows | Apply to the window you started from (default) or to every open window. Going back to Focused turns it off everywhere else. |
 | Tolerance | How close a pixel has to be to that color to be affected. |
 | Frost | 0 is clear glass. Higher values blur what shows through, up to fully frosted at 1. |
 | Pick from screen (`P`) | Grab the color under the cursor with hyprpicker. |

@@ -8,6 +8,9 @@
 #                                     apply color (0-255), tolerance and frost
 #                                     (0-1, how much blur shows through),
 #                                     enabling it
+#   alpha-black set-all R G B TOL FROST
+#                                     same as set, for every open window
+#   alpha-black release-others ADDR   turn it off on every window but ADDR
 #   alpha-black uninstall [--yes]     remove the plugin and everything it added
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -209,6 +212,23 @@ set_config() {
   write_state "$addr" on "$config"
 }
 
+set_all() {
+  local addr
+  while read -r addr; do
+    set_config "$addr" "$@"
+  done < <(hyprctl clients -j | jq -r '.[] | select(.mapped) | .address')
+}
+
+release_others() {
+  local keep=$1 addr state config
+  [[ -n $keep ]] || fail "Usage: alpha-black release-others ADDR"
+  while read -r addr state config <&3; do
+    [[ $addr != "$keep" && $state == on ]] || continue
+    dispatch "$addr" "$(shader_args $config)" 0
+    write_state "$addr" off "$config"
+  done 3< <(cat "$STATE_FILE" 2>/dev/null)
+}
+
 # Removes the menu row the editor added, then checks the file still parses
 # the way the shell parses it (full-line comments and trailing commas
 # stripped), putting it back untouched if not.
@@ -265,6 +285,8 @@ flock 9
 case "${1:-toggle}" in
   toggle) ensure_darkwindow; toggle ;;
   set) ensure_darkwindow; shift; set_config "$@" ;;
+  set-all) ensure_darkwindow; shift; set_all "$@" ;;
+  release-others) ensure_darkwindow; release_others "${2:-}" ;;
   uninstall) shift; uninstall "$@" ;;
   *) fail "Unknown command: $1" ;;
 esac
